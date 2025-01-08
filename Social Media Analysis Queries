@@ -1,0 +1,497 @@
+Social Media Analysis
+
+
+SQL Queries
+
+1.	Are there any tables with duplicate or missing null values? If so, how would you handle them?
+Below are queries used to find if there are any NULL values in the given tables.
+
+-	For Comments Table:
+SELECT comment_text, user_id, photo_id, created_at
+FROM comments 
+where  comment_text is Null 
+and user_id is null 
+and photo_id is null 
+and created_at is null
+GROUP BY 1,2,3,4
+-	For Follows Table:
+select follower_id, followee_id, created_at
+from follows
+where follower_id is NULL
+and followee_id is NULL
+and created_at is NULL
+group by 1,2,3
+-	For Likes Table:
+select user_id, photo_id, created_at
+from likes
+where user_id is NULL 
+or photo_id is NULL
+or created_at is NULL
+group by 1,2,3
+
+-	For Photo_Tags table:
+select photo_id, tag_id
+from photo_tags
+where photo_id is NULL
+and tag_id is NULL 
+Group by 1,2
+
+-	For Photos table:
+select id, image_url, user_id, created_dat
+from photos 
+where id is NULL
+and image_url is NULL
+and user_id is NULL 
+and created_dat is NULL
+Group by 1,2,3,4
+
+-	For Tags table;
+select id, tag_name, created_at
+from tags
+where id is NULL
+and tag_name is NULL
+and created_at is NULL
+Group by 1,2,3
+
+-	For Users table;
+select id, username, created_at
+from users
+where id is NULL
+and username is NULL
+and created_at is NULL
+
+2.	What is the distribution of user activity levels (e.g., number of posts, likes, comments) across the user base?
+select u.id, u.username, count(distinct p.id) as post_count,
+case 
+when count(distinct p.id) = 0 then 'ZERO POSTS'
+when count(distinct p.id)<= max(count(distinct p.id)) over() / 3 then 'LESS POSTS'
+when count(distinct p.id)<=2* max(count(distinct p.id)) over() / 3 then 'MEDIUM POSTS'
+else 'HIGH POSTS'
+end as posts_segments,
+
+count(distinct c.id) comment_count,
+case 
+when count(distinct c.id) = 0 then 'ZERO COMMENTS'
+when count(distinct c.id)<= max(count(distinct c.id)) over() / 3 then 'LESS COMMENTS'
+when count(distinct c.id)<=2* max(count(distinct c.id)) over() / 3 then 'MEDIUM COMMENTS'
+else 'HIGH COMMENTS'
+end as comments_segment,
+
+count(distinct l.photo_id) as likes_count,
+case
+when count(distinct l.photo_id) = 0 then 'ZERO LIKES'
+when count(distinct l.photo_id)<= max(count(distinct l.photo_id)) over() / 3 then 'LESS LIKES'
+when count(distinct l.photo_id)<=2* max(count(distinct l.photo_id)) over() / 3 then 'MEDIUM COMMENTS'
+else 'HIGH COMMENTS'
+end as likes_segment
+
+from users u 
+left join photos p ON u.id = p.user_id
+left join likes l ON u.id = l.user_id
+left join comments c ON u.id = c.user_id
+group by 1, 2;
+Concepts used for the above query:
+1.	COUNT() with DISTINCT - To count the distinct (unique) number of posts, comments and likes
+2.	CASE Expression for Categorization - To classify users based on their count of  posts, comments and likes
+3.	Window Functions (i.e., OVER() and MAX() - To calculate the maximum count of posts, comments, or likes across all users
+4.	LEFT JOIN - To join the tables
+
+
+
+
+3.	Calculate the average number of tags per post (photo_tags and photos tables).
+with cte as (select p.id as photo_id,
+count(pt.tag_id) as no_of_tags
+from photos p 
+left join photo_tags pt on p.id = pt.photo_id
+group by p.id)
+select round(avg(no_of_tags),2) as avg_no_of_tags_per_post
+from cte
+
+4.	Identify the top users with the highest engagement rates (likes, comments) on their posts and rank them.
+WITH cte AS (
+    SELECT u.id AS user_id, u.username,
+    (COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id)) AS engagement,
+    (COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id)) * 100 / SUM((COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id))) OVER() AS engagement_rate, 
+    DENSE_RANK() OVER(ORDER BY (COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id)) DESC) AS highest_engagements
+    FROM users u 
+    LEFT JOIN photos p ON u.id = p.user_id
+    LEFT JOIN likes l ON u.id = l.user_id
+    LEFT JOIN comments c ON u.id = c.user_id
+    GROUP BY 1
+)
+SELECT user_id, username, engagement_rate, highest_engagements AS ranking FROM cte
+5.	Which users have the highest number of followers and followings?
+WITH follower_counts AS (
+    SELECT 
+        followee_id, 
+        COUNT(follower_id) AS number_of_followers
+    FROM follows
+    GROUP BY followee_id
+),
+max_followers AS (
+    SELECT MAX(number_of_followers) AS max_followers
+    FROM follower_counts
+)
+SELECT 
+    u.username,
+    fc.followee_id,
+    fc.number_of_followers,
+    COUNT(*) OVER () AS count_of_followee_with_highest_followers
+FROM follower_counts fc
+JOIN users u ON fc.followee_id = u.id
+JOIN max_followers mf ON fc.number_of_followers = mf.max_followers
+ORDER BY fc.followee_id;
+WITH follower_counts AS (
+    SELECT 
+        follower_id,
+        COUNT(followee_id) AS number_of_followees
+    FROM follows
+    GROUP BY follower_id
+),
+max_followers AS (
+    SELECT MAX(number_of_followees) AS max_followees
+    FROM follower_counts
+)
+SELECT 
+    u.username,
+    fc.follower_id,
+    fc.number_of_followees,
+    (SELECT COUNT(*)
+     FROM follower_counts fc2
+     WHERE fc2.number_of_followees = fc.number_of_followees) AS count_of_follower_with_highest_followers
+FROM follower_counts fc
+JOIN users u ON fc.follower_id = u.id
+JOIN max_followers mf ON fc.number_of_followees = mf.max_followees
+ORDER BY fc.follower_id;
+
+6.	Calculate the average engagement rate (likes, comments) per post for each user.
+with cte as (select u.id, u.username, p.id as post_id,
+count(distinct l.user_id) + count(distinct c.id) as total_engagement
+from users u
+left join photos p on u.id = p.user_id
+left join likes l on p.id = l.photo_id 
+left join comments c on p.id = c.photo_id
+group by 1,2,3
+)
+select id, username, 
+round(avg(total_engagement),2) as average_enagagement_per_post_per_user
+from cte 
+group by id,username
+order by average_enagagement_per_post_per_user asc limit 15;
+
+7.	Get the list of users who have never liked any post (users and likes tables)
+select u.id, u.username, count(distinct l.photo_id) as count_of_likes
+from users u left join likes l 
+on u.id = l.user_id
+group by 1,2
+having count(distinct l.photo_id) = 0
+order by id, username asc;
+8.	How can you leverage user-generated content (posts, hashtags, photo tags) to create more personalized and engaging ad campaigns?
+WITH tag_counts AS (
+    SELECT 
+        u.id AS user_id,
+        t.tag_name, 
+        COUNT(t.tag_name) AS tags_count
+    FROM users u
+    JOIN photos p ON u.id = p.user_id
+    JOIN photo_tags pt ON p.id = pt.photo_id
+    JOIN tags t ON pt.tag_id = t.id
+    GROUP BY u.id, t.tag_name
+),
+max_tag_counts AS (
+    SELECT 
+        tag_name, 
+        MAX(tags_count) AS max_count
+    FROM tag_counts
+    GROUP BY tag_name
+)
+SELECT 
+    tc.user_id, 
+    tc.tag_name, 
+    tc.tags_count
+FROM tag_counts tc
+JOIN max_tag_counts mtc 
+    ON tc.tag_name = mtc.tag_name
+    AND tc.tags_count = mtc.max_count
+ORDER BY tc.user_id, tc.tag_name;
+9.	Are there any correlations between user activity levels and specific content types (e.g., photos, videos, reels)? How can this information guide content creation and curation strategies?
+select p.id as photo_id, p.image_url as post_url, 
+count(distinct l.user_id) as likes_count,
+count(distinct c.id) as comments_count
+from photos p
+left join likes l on p.id = l.photo_id
+left join comments c on p.id = c.photo_id
+group by 1 
+order by 3 desc;
+
+
+
+10.	Calculate the total number of likes, comments, and photo tags for each user.
+	WITH user_activity AS (
+SELECT u.id AS user_id, 
+u.username, 
+COUNT(DISTINCT l.user_id) AS likes_count, 
+COUNT(DISTINCT pt.tag_id) AS tags_count
+FROM users u
+LEFT JOIN photos p ON u.id = p.user_id
+LEFT JOIN likes l ON p.id = l.photo_id
+LEFT JOIN comments c ON p.id = c.photo_id
+LEFT JOIN photo_tags pt ON p.id = pt.photo_id
+GROUP BY 
+u.id,  
+u.username
+)
+SELECT user_id, username, 
+SUM(likes_count) AS likes_count, 
+SUM(comments_count) AS comments_count, 
+SUM(tags_count) AS tags_count
+FROM user_activity
+GROUP BY user_id, username;
+
+
+11.	Rank users based on their total engagement (likes, comments, shares) over a month.
+select date_format(p.created_dat, '%Y-%m') as month,  u.id, u.username,
+(count(distinct l.photo_id) + count(distinct c.id)) as total_enagagement_rate,
+dense_rank() over(partition by date_format(p.created_dat, '%Y-%m') order by 
+(count(distinct l.photo_id) + count(distinct c.id)) desc) as engagement_rank
+from users u
+left join photos p on u.id = p.user_id 
+left join likes l on u.id = l.user_id and p.created_dat = l.created_at
+left join comments c on u.id = c.user_id and p.created_dat = c.created_at
+where date_format(p.created_dat, '%Y-%m') is not null
+group by  1,2,3
+
+12.	Retrieve the hashtags that have been used in posts with the highest average number of likes. Use a CTE to calculate the average likes for each hashtag first.
+with highest_avg_likes AS (
+    select post_id
+    from (
+        select p.id as post_id, avg_likes, rank() over(order by avg_likes DESC) AS ranking
+        from photos p
+       left join (
+            select photo_id, count(user_id) / (select COUNT(distinct user_id) from photos) as avg_likes
+            from likes
+            group by 1
+        ) l on p.id = l.photo_id
+    ) dt 
+    where ranking = 1
+)
+select al.post_id, group_concat(t.tag_name) as hashtags
+from highest_avg_likes al
+join photo_tags pt on al.post_id = pt.photo_id
+join tags t on pt.tag_id = t.id
+group by 1;
+
+13.	Retrieve the users who have started following someone after being followed by that person
+select f1.follower_id as followed_back, f1.followee_id as followee
+from follows f1 
+join follows f2 on f1.follower_id = f2.followee_id
+and f1.followee_id = f2.followee_id and 
+f1.created_at>f2.created_at
+
+
+
+
+
+Subjective Questions
+
+1.	Based on user engagement and activity levels, which users would you consider the most loyal or valuable? How would you reward or incentivize these users?
+  with user_activity as (select u.id as user_id,u.username,
+    count(distinct p.id) as posts_count,
+    count(distinct l.photo_id) as likes_count,
+    count(distinct c.id) as comments_count,
+    count(distinct p.id) + count(distinct l.photo_id) + count(distinct c.id) as engagement_rate,
+    dense_rank() over(order by count(distinct p.id) + count(distinct l.photo_id) + count(distinct c.id) desc) user_rank
+    from users u
+    left join photos p on u.id = p.user_id
+    left join likes l on u.id = l.user_id
+    left join comments c on u.id = c.user_id 
+    group by u.id, u.username
+    )
+     select user_id, username, posts_count, likes_count, comments_count, engagement_rate
+    from user_activity
+    where user_rank between 1 and 5 and posts_count >0;
+
+2.	For inactive users, what strategies would you recommend to re-engage them and encourage them to start posting or engaging again?
+WITH cte AS (
+SELECT u.id AS user_id, u.username, 
+COUNT(DISTINCT p.id) AS posts_count, 
+COUNT(DISTINCT l.photo_id) AS likes_count, 
+COUNT(DISTINCT c.id) AS comments_count,
+COUNT(DISTINCT p.id) + COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id) AS user_engagement, 
+DENSE_RANK() OVER(ORDER BY COUNT(DISTINCT p.id) + COUNT(DISTINCT l.photo_id) + COUNT(DISTINCT c.id)) AS drank
+FROM users u 
+LEFT JOIN photos p ON u.id = p.user_id
+LEFT JOIN likes l ON u.id = l.user_id
+LEFT JOIN comments c ON u.id = c.user_id
+GROUP BY 1, 2
+)
+SELECT user_id, username, posts_count, likes_count, comments_count, user_engagement
+FROM cte 
+WHERE drank BETWEEN 1 AND 10
+ORDER BY 1;
+
+3.	Which hashtags or content topics have the highest engagement rates? How can this information guide content strategy and ad campaigns?
+with likes_count as (
+ select t.tag_name,count(l.user_id) as likes_count
+ from tags t
+ left join photo_tags pt on t.id = pt.tag_id 
+ left join likes l on pt.photo_id = l.photo_id
+ group by t.tag_name
+ ),
+ posts_count as (
+ select t.tag_name,count(p.id) as posts_count
+ from tags t
+ left join photo_tags pt on t.id = pt.tag_id 
+ left join photos p on pt.photo_id = p.id
+ group by t.tag_name
+ ),
+comments_count as (
+ select t.tag_name, count(c.id) as comments_count
+ from tags t
+ left join photo_tags pt on t.id = pt.tag_id 
+ left join comments c on pt.photo_id = c.photo_id
+ group by t.tag_name
+ )
+select cl.tag_name, 
+cl.likes_count + cp.posts_count + cc.comments_count as engagement,
+round((cl.likes_count + cp.posts_count + cc.comments_count) * 100 /
+sum(cl.likes_count + cp.posts_count + cc.comments_count) over(), 2) as engagement_rate
+from likes_count cl
+join posts_count cp ON cl.tag_name = cp.tag_name
+join comments_count cc ON cl.tag_name = cc.tag_name
+order by 2 desc
+limit 5;
+4.	Are there any patterns or trends in user engagement based on demographics (age, location, gender) or posting times? How can these insights inform targeted marketing campaigns?
+
+
+ select 
+ weekday(p.created_dat) as day_of_week,  
+ extract(hour from p.created_dat) as hour_of_day,
+ count(distinct p.id) as total_posts_made,
+ count(distinct l.user_id) as total_likes_recieved,
+ count(distinct c.id) as total_comments_made
+ from photos p
+ left join likes l on p.id = l.photo_id
+ left join comments c on p.id = c.photo_id
+ where extract(hour from p.created_dat) is not null
+ group by day_of_week, hour_of_day
+ order by day_of_week, hour_of_day;
+
+select 
+dayofweek(u.created_at) as day_of_week,
+extract(hour from u.created_at) as hour_of_day,
+count(distinct p.id) as total_posts_made,
+count(distinct l.user_id) as total_likes_recieved,
+count(distinct c.id) as total_comments_made
+from users u 
+left join photos p on u.id = p.user_id
+left join likes l on p.id = l.photo_id
+left join comments c on p.id = c.photo_id
+where extract(hour from u.created_at) is not null
+group by 1,2
+order by 1,2;
+
+5.	Based on follower counts and engagement rates, which users would be ideal candidates for influencer marketing campaigns? How would you approach and collaborate with these influencers?
+with user_engagement as (
+  select 
+    u.id,
+    u.username,
+    count(f.follower_id) as followers,
+    sum(l.likes) as likes,
+    sum(c.comments) as comments,
+    (sum(l.likes) + sum(c.comments)) / count(f.follower_id) as engagement_rate
+  from 
+    users u
+  left join 
+    follows f on u.id = f.followee_id
+  left join 
+    (select photo_id, count(*) as likes from likes group by photo_id) l on l.photo_id in (select id from photos where user_id = u.id)
+  left join 
+    (select photo_id, count(*) as comments from comments group by photo_id) c on c.photo_id in (select id from photos where user_id = u.id)
+  group by 
+    u.id, u.username
+)
+select  * from  user_engagement
+where followers > 1000 and engagement_rate > 0.05;
+
+6.	Based on user behavior and engagement data, how would you segment the user base for targeted marketing campaigns or personalized recommendations?
+WITH user_engagement AS (
+	SELECT
+    	u.id AS user_id,
+        u.username,
+        COALESCE(p.engagement, 0) + COALESCE(l.engagement, 0) + COALESCE(c.engagement, 0) AS engagement,
+        COALESCE(t.tag_count, 0) AS tag_count
+	FROM
+    	users u
+	LEFT JOIN (
+    	SELECT user_id, COUNT(DISTINCT id) AS engagement
+    	FROM photos
+    	GROUP BY user_id
+	) p ON u.id = p.user_id
+	LEFT JOIN (
+    	SELECT user_id, COUNT(DISTINCT photo_id) AS engagement
+    	FROM likes
+    	GROUP BY user_id
+	) l ON u.id = l.user_id
+	LEFT JOIN (
+    	SELECT user_id, COUNT(DISTINCT id) AS engagement
+    	FROM comments
+    	GROUP BY user_id
+	) c ON u.id = c.user_id
+	LEFT JOIN (
+                    	SELECT u.id AS user_id,
+        COUNT(DISTINCT t.tag_name) AS tag_count
+    	FROM
+    	users u
+	LEFT JOIN photos p ON u.id = p.user_id
+	LEFT JOIN photo_tags pt ON p.id = pt.photo_id
+	LEFT JOIN tags t ON pt.tag_id = t.id
+	GROUP BY u.id
+	) t ON u.id = t.user_id
+),
+global_max AS (
+	SELECT
+        MAX(engagement) AS max_engagement,
+        MAX(tag_count) AS max_tag_count
+	FROM user_engagement
+),
+user_tags AS (
+	SELECT
+    	u.id AS user_id,
+        group_concat(t.tag_name) AS tags
+	FROM
+    	users u
+	LEFT JOIN photos p ON u.id = p.user_id
+	LEFT JOIN photo_tags pt ON p.id = pt.photo_id
+	LEFT JOIN tags t ON pt.tag_id = t.id
+	GROUP BY u.id
+),
+user_segments AS (
+	SELECT
+        e.user_id,
+        e.username,
+        e.engagement,
+        e.tag_count,
+    	t.tags,
+    	CASE
+        	WHEN e.engagement < gm.max_engagement / 3 AND e.tag_count < gm.max_tag_count / 3 THEN 'Low Engagement'
+        	WHEN e.engagement < 2 * gm.max_engagement / 3 AND e.tag_count < 2 * gm.max_tag_count / 3 THEN 'Moderate Engagement'
+        	ELSE 'High Engagement'
+    	END AS engagement_segment
+	FROM user_engagement e
+	LEFT JOIN user_tags t ON e.user_id = t.user_id
+	CROSS JOIN global_max gm  -- Cross join to ensure you can use the global maximums
+	GROUP BY e.user_id, e.username, e.engagement, e.tag_count, t.tags, gm.max_engagement, gm.max_tag_count
+)
+SELECT *
+FROM user_segments
+WHERE tag_count > 0 AND tags IS NOT NULL and engagement_segment in ('High Engagement', 'Low Engagement')
+ORDER BY engagement_segment, engagement DESC;
+
+7.	Assuming there's a "User_Interactions" table tracking user engagements, how can you update the "Engagement_Type" column to change all instances of "Like" to "Heart" to align with Instagram's terminology?
+This can be done using DML(Data Manipulation Language) function:
+Query to do this is:
+UPDATE User_Interactions
+SET Engagement_Type = 'Heart'
+WHERE Engagement_Type = 'Like';
